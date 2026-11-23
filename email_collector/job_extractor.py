@@ -3,6 +3,71 @@ import re
 import sqlite3
 
 
+JOB_LINK_PATTERN = re.compile(
+    r"linkedin\.com/(?:comm/)?jobs/view/(\d+)",
+    re.IGNORECASE
+)
+DIVIDER_PATTERN = re.compile(r"^-{10,}$")
+NOISE_PHRASES = (
+    "this company is actively hiring",
+    "apply with resume & profile",
+    "apply with resume and profile",
+    "easy apply",
+    "be an early applicant",
+)
+IGNORED_PREFIXES = (
+    "ta firma prowadzi",
+    "aplikuj",
+    "wyświetl ofertę pracy",
+    "view job",
+    "apply now",
+    "your job alert",
+    "twój alert",
+)
+
+
+def _is_job_metadata(line):
+    normalized = re.sub(r"\s+", " ", line).strip().casefold()
+    return (
+        not normalized
+        or DIVIDER_PATTERN.fullmatch(normalized)
+        or normalized.startswith(IGNORED_PREFIXES)
+        or any(phrase in normalized for phrase in NOISE_PHRASES)
+        or re.match(r"^\d+\s+kontakt\b", normalized, re.IGNORECASE)
+    )
+
+
+def _job_details_before_link(lines, link_index):
+    """Get title/company/location from this listing, not nearby UI text."""
+
+    start = link_index - 1
+    while start >= 0:
+        line = lines[start]
+        if (
+            JOB_LINK_PATTERN.search(line)
+            or DIVIDER_PATTERN.fullmatch(line)
+            or line.casefold().startswith(("your job alert", "twój alert"))
+        ):
+            break
+        start -= 1
+
+    details = [
+        line for line in lines[start + 1:link_index]
+        if not _is_job_metadata(line)
+    ]
+
+    if len(details) < 2:
+        return None
+
+    title, company = details[-3:-1] if len(details) >= 3 else details[-2:]
+    location = details[-1] if len(details) >= 3 else ""
+
+    if not title or not company or _is_job_metadata(title) or _is_job_metadata(company):
+        return None
+
+    return title, company, location
+
+
 
 def extract_jobs_from_email(body):
     jobs = []
@@ -14,19 +79,8 @@ def extract_jobs_from_email(body):
         if line.strip()
     ]
 
-    ignored_prefixes = (
-        "ta firma prowadzi",
-        "aplikuj",
-        "wyświetl ofertę pracy",
-        "view job",
-        "apply now",
-    )
-
     for i, line in enumerate(lines):
-        match = re.search(
-            r"linkedin\.com/(?:comm/)?jobs/view/(\d+)",
-            line
-        )
+        match = JOB_LINK_PATTERN.search(line)
 
         if not match:
             continue
@@ -36,31 +90,11 @@ def extract_jobs_from_email(body):
         if job_id in seen_ids:
             continue
 
-        # Find the three lines describing this job.
-        previous_lines = []
-        j = i - 1
-
-        while j >= 0 and len(previous_lines) < 3:
-            candidate = lines[j]
-
-            if (
-                candidate.lower().startswith(ignored_prefixes)
-                or re.match(r"^\d+\s+kontakt\b", candidate, re.IGNORECASE)
-            ):
-                j -= 1
-                continue
-
-            previous_lines.append(candidate)
-            j -= 1
-
-        if len(previous_lines) != 3:
+        details = _job_details_before_link(lines, i)
+        if not details:
             continue
 
-        title, company, location = reversed(previous_lines)
-
-        # Ignore alert introductions and other obvious noise.
-        if title.lower().startswith("twój alert"):
-            continue
+        title, company, location = details
 
         jobs.append({
             "job_id": job_id,
@@ -74,6 +108,21 @@ def extract_jobs_from_email(body):
         seen_ids.add(job_id)
 
     return jobs
+
+
+def _has_malformed_job_fields(title, company, location):
+    """Recognize obvious LinkedIn alert badges saved as job fields."""
+
+    fields = (title, company, location)
+    return (
+        not str(title or "").strip()
+        or not str(company or "").strip()
+        or any(
+            str(value or "").strip()
+            and _is_job_metadata(str(value).strip())
+            for value in fields
+        )
+    )
 
 
 def create_jobs_table(conn):
@@ -111,6 +160,7 @@ def main():
     """).fetchall()
 
     inserted = 0
+    repaired = 0
 
     for gmail_id, body in emails:
         jobs = extract_jobs_from_email(body)
@@ -138,7 +188,30 @@ def main():
                 gmail_id
             ))
 
-            inserted += cursor.rowcount
+            if cursor.rowcount:
+                inserted += cursor.rowcount
+                continue
+
+            existing = conn.execute("""
+                SELECT title, company, location, source
+                FROM jobs WHERE job_id = ?
+            """, (job["job_id"],)).fetchone()
+            if (
+                existing
+                and existing[3] == "LinkedIn"
+                and _has_malformed_job_fields(*existing[:3])
+            ):
+                update_cursor = conn.execute("""
+                    UPDATE jobs
+                    SET title = ?, company = ?, location = ?
+                    WHERE job_id = ? AND source = 'LinkedIn'
+                """, (
+                    job["title"],
+                    job["company"],
+                    job["location"],
+                    job["job_id"]
+                ))
+                repaired += update_cursor.rowcount
 
     conn.commit()
 
@@ -147,6 +220,7 @@ def main():
     ).fetchone()[0]
 
     print(f"New jobs saved: {inserted}")
+    print(f"Malformed LinkedIn jobs repaired: {repaired}")
     print(f"Total unique jobs in database: {total}")
 
     conn.close()

@@ -1,3 +1,4 @@
+import importlib
 import json
 import re
 import sqlite3
@@ -22,12 +23,11 @@ DB_PATH = BASE_DIR / "data" / "jobs_before_manual.db"
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from job_collector.linkedin_importer import (
-    LinkedInImportError,
-    fetch_linkedin_job,
-    linkedin_job_id,
-    normalize_linkedin_url,
-)
+from job_collector import linkedin_importer
+
+if not callable(getattr(linkedin_importer, "fetch_job_offer", None)):
+    linkedin_importer = importlib.reload(linkedin_importer)
+
 from job_collector.expiration_checker import check_linkedin_jobs
 
 st.set_page_config(
@@ -1126,7 +1126,7 @@ def find_existing_job(url, exclude_job_id=None):
     if not url:
         return None
 
-    linkedin_id = linkedin_job_id(url) or ""
+    linkedin_id = linkedin_importer.linkedin_job_id(url) or ""
 
     conn = get_connection()
     query = """
@@ -1162,7 +1162,10 @@ def add_manual_job(
     # is written to the database.
     from job_scorer.scorer import calculate_scores
 
-    job_id = linkedin_job_id(url) or f"manual-{uuid4().hex[:12]}"
+    job_id = (
+        linkedin_importer.linkedin_job_id(url)
+        or f"manual-{uuid4().hex[:12]}"
+    )
 
     job = {
         "job_id": job_id,
@@ -1363,10 +1366,10 @@ def load_expiration_check_jobs():
             "job_id": str(row[0]),
             "title": clean(row[1], "Untitled job"),
             "company": clean(row[2], "Unknown company"),
-            "job_url": normalize_linkedin_url(row[3]),
+            "job_url": linkedin_importer.normalize_linkedin_url(row[3]),
         }
         for row in rows
-        if linkedin_job_id(row[3])
+        if linkedin_importer.linkedin_job_id(row[3])
     ]
 
 
@@ -1407,7 +1410,9 @@ def load_expired_jobs():
             "job_id": str(row[0]),
             "title": clean(row[1], "Untitled job"),
             "company": clean(row[2], "Unknown company"),
-            "job_url": normalize_linkedin_url(row[3]) or row[3],
+            "job_url": (
+                linkedin_importer.normalize_linkedin_url(row[3]) or row[3]
+            ),
             "expired_at": row[4],
         }
         for row in rows
@@ -1694,7 +1699,7 @@ def render_job_edit_form(job_id, job=None, form_key=None):
         st.error(str(error))
         return
 
-    url = normalize_linkedin_url(url) or url
+    url = linkedin_importer.normalize_linkedin_url(url) or url
     existing = find_existing_job(url, exclude_job_id=job_id)
     if existing:
         st.error(
@@ -2710,11 +2715,11 @@ JOB_LIST_HEADERS = [
 
 @st.dialog("Add a job manually")
 def add_job_dialog(default_track_label):
-    """Import a LinkedIn job or enter a job manually."""
+    """Import a public job offer page or enter a job manually."""
 
     st.caption(
-        "Paste a LinkedIn job link and import its public details, or enter "
-        "the details manually. A full description improves the match score."
+        "Paste a public job offer link to import its details, or enter them "
+        "manually. A full description improves the match score."
     )
 
     link_col, fetch_col = st.columns([4, 1], vertical_alignment="bottom")
@@ -2722,19 +2727,19 @@ def add_job_dialog(default_track_label):
         url = st.text_input(
             "Job link",
             key="manual_job_link",
-            placeholder="https://www.linkedin.com/jobs/view/..."
+            placeholder="https://example.com/careers/job-offer"
         )
     with fetch_col:
         fetch_clicked = st.button(
             "Fetch details",
-            key="fetch_linkedin_job",
+            key="fetch_job_offer",
             **STRETCH
         )
 
     if fetch_clicked:
         try:
-            imported = fetch_linkedin_job(url)
-        except LinkedInImportError as error:
+            imported = linkedin_importer.fetch_job_offer(url)
+        except linkedin_importer.LinkedInImportError as error:
             st.error(str(error))
         else:
             st.session_state["manual_job_title"] = imported["title"]
@@ -2744,6 +2749,11 @@ def add_job_dialog(default_track_label):
             st.session_state["manual_job_posted_date_text"] = (
                 normalize_posted_date(imported["date_posted"]) or ""
             )
+            imported_employment = imported["employment_type"]
+            if imported_employment in EMPLOYMENT_TYPES:
+                st.session_state["manual_job_employment_type"] = (
+                    imported_employment
+                )
             st.success(
                 "Public job details fetched. Review and edit them before adding."
             )
@@ -2766,7 +2776,11 @@ def add_job_dialog(default_track_label):
         col1, col2 = st.columns(2)
 
         with col1:
-            employment = st.selectbox("Employment type", EMPLOYMENT_TYPES)
+            employment = st.selectbox(
+                "Employment type",
+                EMPLOYMENT_TYPES,
+                key="manual_job_employment_type"
+            )
 
         with col2:
             hours = st.number_input(
@@ -2822,7 +2836,7 @@ def add_job_dialog(default_track_label):
         st.error(str(error))
         return
 
-    canonical_url = normalize_linkedin_url(url)
+    canonical_url = linkedin_importer.normalize_linkedin_url(url)
     if canonical_url:
         url = canonical_url
 

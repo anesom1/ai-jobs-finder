@@ -1,8 +1,8 @@
 # AI Job Assistant
 
-A local job-search assistant. It collects job-alert emails from Gmail, extracts LinkedIn listings, fetches public job descriptions, scores completed listings against three career tracks, and presents them in a Streamlit dashboard for searching and application tracking.
+A local job-search assistant. It collects job-alert emails from Gmail, extracts LinkedIn listings, fetches public job descriptions, scores completed listings against three career tracks, and presents them in a Streamlit dashboard for searching and application tracking. Job offers from other public job boards can also be imported by pasting their link into the manual-add form.
 
-The database is stored locally in SQLite at `data/jobs_before_manual.db`. The app connects to Gmail and public LinkedIn pages over the internet; optional scoring uses a local Ollama server.
+The database is stored locally in SQLite at `data/jobs_before_manual.db`. The app connects to Gmail and public job-offer pages over the internet; optional scoring uses a local Ollama server.
 
 ---
 
@@ -17,7 +17,7 @@ Gmail alerts ──► gmail_collector ──► job_extractor ──► descrip
 | Step | Script | What it does |
 |------|--------|--------------|
 | 1 | `email_collector/gmail_collector.py` | Searches the last 14 days of Gmail for LinkedIn and Indeed job-alert senders and saves new messages to `job_emails`. Previously saved messages are skipped. |
-| 2 | `email_collector/job_extractor.py` | Extracts LinkedIn job IDs, titles, companies, locations and links from LinkedIn alert emails into `jobs`. Indeed messages are collected but are not parsed into jobs. Deleted job IDs are skipped and duplicate jobs are ignored. |
+| 2 | `email_collector/job_extractor.py` | Extracts LinkedIn job IDs, titles, companies, locations and links from LinkedIn alert emails into `jobs`. It parses each listing separately and filters common LinkedIn interface labels so they are not saved as job details. On subsequent runs, it repairs existing LinkedIn rows with missing fields or recognized interface labels using the saved source email, updating only title, company and location. Indeed messages are collected but are not parsed into jobs. Deleted job IDs are skipped and duplicate jobs are ignored. |
 | 3 | `job_collector/description_collector.py` | Fetches up to 25 pending or unverified LinkedIn descriptions per run, waits 2 seconds between requests, and checks company information before saving. |
 | 4 | `job_scorer/scorer.py` | Scores jobs whose description status is `completed` for the three tracks and saves each score and its reasons in `job_scores`. |
 
@@ -82,7 +82,7 @@ ai-job-assistant/
 ├── job_collector/
 │   ├── description_collector.py  # step 3
 │   ├── expiration_checker.py     # on-demand LinkedIn availability check
-│   └── linkedin_importer.py      # shared LinkedIn URL and public-page helpers
+│   └── linkedin_importer.py      # public job-page importer and URL helpers
 ├── job_scorer/
 │   └── scorer.py                 # step 4
 ├── dashboard/
@@ -153,6 +153,12 @@ python run_daily.py --force    # run anyway
 ```
 
 `run_daily.py` stops at the first step that fails, writes a log to `logs/sync_YYYY-MM-DD.log` and records the result in the `sync_runs` table.
+
+To run the offline regression tests for LinkedIn alert parsing:
+
+```bash
+python -m unittest test_job_extractor -v
+```
 
 **Single steps:**
 
@@ -228,7 +234,7 @@ Use **⏰ Check LinkedIn** to visit each active, unexpired LinkedIn job link and
 
 ### Adding a job manually
 
-Use **➕ Add job manually** to add a job I found myself. Paste a LinkedIn job link and select **Fetch details** to prefill the title, company, location and description from its public page. Review and edit the details before adding. If LinkedIn does not make the page available, enter the details manually instead.
+Use **➕ Add job manually** to add a job I found myself. Paste a public job-offer link (for example, LinkedIn or a Recruitee listing) and select **Fetch details** to prefill the title, company, location, description and any available posted date or employment type. The importer reads standard JobPosting structured data when available and falls back to page headings and metadata. Review and edit the imported details before adding. Some sites may block automated requests or not expose all fields; fill in missing details manually.
 
 - Required: job title and company. Optional: location, posted date (`YYYY-MM-DD`), link, employment type, weekly hours and description.
 - I choose the career track it belongs to and its starting status (New, Saved or Applied).
