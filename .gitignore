@@ -6,3 +6,4 @@ token.json
 data/
 logs/
 *.pyc
+.DS_Store
