@@ -102,8 +102,7 @@ Other files in the project (helper scripts, older versions) are not part of the 
 cd ai-job-assistant
 python3 -m venv .venv
 source .venv/bin/activate
-pip install streamlit pandas requests beautifulsoup4 \
-            google-api-python-client google-auth google-auth-oauthlib
+pip install -r requirements.txt
 ```
 
 The dashboard needs **Streamlit 1.40 or newer** (it uses segmented controls and dialogs).
@@ -283,3 +282,7 @@ The dashboard and pipeline create or upgrade their tables and columns as needed.
 | `Operation not permitted` in `logs/launchd.log` | macOS blocks background access to the project folder. Move the project out of Documents / Desktop / Downloads, or give the `.venv` Python Full Disk Access. |
 | Jobs stuck as `failed` after a bad network moment | Set them back to pending: `UPDATE jobs SET description_status = 'pending' WHERE description_status = 'failed';` |
 | Nothing new appears | Run `python run_daily.py --force` and read the log. Only LinkedIn job-alert emails are turned into jobs. |
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
