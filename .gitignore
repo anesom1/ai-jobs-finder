@@ -1,5 +1,9 @@
 .venv/
+node_modules/
 __pycache__/
+.pytest_cache/
+playwright-report/
+test-results/
 .env
 credentials.json
 token.json

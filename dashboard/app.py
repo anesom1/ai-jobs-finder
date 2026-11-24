@@ -1,5 +1,6 @@
 import importlib
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -17,7 +18,10 @@ import streamlit as st
 # --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "data" / "jobs_before_manual.db"
+DB_PATH = Path(os.environ.get(
+    "AI_JOB_ASSISTANT_DB",
+    BASE_DIR / "data" / "jobs_before_manual.db"
+)).expanduser().resolve()
 
 # Lets the dashboard import the scorer (job_scorer/scorer.py) for manual jobs.
 if str(BASE_DIR) not in sys.path:
