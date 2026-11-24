@@ -153,10 +153,21 @@ python run_daily.py --force    # run anyway
 
 `run_daily.py` stops at the first step that fails, writes a log to `logs/sync_YYYY-MM-DD.log` and records the result in the `sync_runs` table.
 
-To run the offline regression tests for LinkedIn alert parsing:
+Run the Python regression tests:
 
 ```bash
-python -m unittest test_job_extractor -v
+python -m unittest discover -v
+```
+
+The browser end-to-end tests use an isolated SQLite database and Chromium;
+they do not require Gmail credentials or contact external job sites. With
+Node.js 22 or newer and the Python environment from `requirements.txt`
+active, install the browser and run them:
+
+```bash
+npm ci
+npx playwright install chromium
+npm run test:e2e
 ```
 
 **Single steps:**
